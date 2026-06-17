@@ -1,0 +1,61 @@
+# Declarative multi-agent Workflow (Microsoft Agent Framework schema), hosted in Foundry.
+# A Drafter agent writes a weekly outpatient OPERATIONS report (appointments, wait times,
+# staffing); a Reviewer agent approves it or requests changes. Loops until the Reviewer's
+# reply contains "approved". Operational/administrative — not clinical.
+#
+# IMPORTANT schema rule (this is what fixes "Unsupported root element: UnknownBotElement"):
+#   `kind: workflow` and `trigger:` come FIRST, and the root fields `id` / `name` /
+#   `description` go at the BOTTOM, after the trigger. `id: ""` (empty) is required.
+#   Verified against the LazaUK and jplck Foundry hosted-workflow samples.
+#
+# The agents referenced (DrafterAgent / ReviewerAgent) must exist with these exact names.
+kind: workflow
+trigger:
+  kind: OnConversationStart
+  id: trigger_wf
+  actions:
+    - kind: SetVariable
+      id: init_latest
+      variable: Local.LatestMessage
+      value: =UserMessage(System.LastMessageText)
+
+    - kind: InvokeAzureAgent
+      id: invoke_drafter
+      agent:
+        name: DrafterAgent
+      conversationId: =System.ConversationId
+      input:
+        messages: =Local.LatestMessage
+      output:
+        messages: Local.LatestMessage
+      autoSend: true
+
+    - kind: InvokeAzureAgent
+      id: invoke_reviewer
+      agent:
+        name: ReviewerAgent
+      conversationId: =System.ConversationId
+      input:
+        messages: =Local.LatestMessage
+      output:
+        messages: Local.LatestMessage
+      autoSend: true
+
+    - kind: ConditionGroup
+      id: check_approved
+      conditions:
+        - id: if_approved
+          condition: =!IsBlank(Find("approved", Lower(Last(Local.LatestMessage).Text)))
+          actions:
+            - kind: SendActivity
+              id: send_final
+              activity: "{Last(Local.LatestMessage).Text}"
+            - kind: EndConversation
+              id: end_conversation
+      elseActions:
+        - kind: GotoAction
+          id: loop_back
+          actionId: invoke_drafter
+id: ""
+name: OpsReviewWorkflow
+description: Drafter writes an operations report; Reviewer approves or loops back for changes.
